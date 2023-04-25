@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
+from torchvision import transforms
 from pcs.models import (CosineClassifier, MemoryBank, SSDALossModule,
                         compute_variance, loss_info, torch_kmeans,
                         update_data_memory)
@@ -12,6 +13,11 @@ from pcs.utils import (AverageMeter, datautils, is_div, per, reverse_domain,
                        torchutils, utils)
 from sklearn import metrics
 from tqdm import tqdm
+import segmentation_models_pytorch as smp
+from torch.utils.data import DataLoader
+from pcs.utils.datautils_seg import *
+from torchvision.datasets import Cityscapes
+
 
 from . import BaseAgent
 
@@ -104,139 +110,187 @@ class CDSAgent(BaseAgent):
         )
 
     def _load_datasets(self):
-        name = self.config.data_params.name
-        num_workers = self.config.data_params.num_workers
-        fewshot = self.config.data_params.fewshot
-        domain = self.domain_map
-        image_size = self.config.data_params.image_size
-        aug_src = self.config.data_params.aug_src
-        aug_tgt = self.config.data_params.aug_tgt
-        raw = "raw"
-
-        self.num_class = datautils.get_class_num(
-            f'data/splits/{name}/{domain["source"]}.txt'
-        )
-        self.class_map = datautils.get_class_map(
-            f'data/splits/{name}/{domain["target"]}.txt'
-        )
-
-        batch_size_dict = {
-            "test": self.config.optim_params.batch_size,
-            "source": self.config.optim_params.batch_size_src,
-            "target": self.config.optim_params.batch_size_tgt,
-            "labeled": self.config.optim_params.batch_size_lbd,
-        }
-        self.batch_size_dict = batch_size_dict
-
-        # self-supervised Dataset
-        for domain_name in ("source", "target"):
-            aug_name = {"source": aug_src, "target": aug_tgt}[domain_name]
-
-            # Training datasets
-            train_dataset = datautils.create_dataset(
-                name,
-                domain[domain_name],
-                suffix="",
-                ret_index=True,
-                image_transform=aug_name,
-                use_mean_std=False,
-                image_size=image_size,
-            )
-
-            train_loader = datautils.create_loader(
-                train_dataset,
-                batch_size_dict[domain_name],
-                is_train=True,
-                num_workers=num_workers,
-            )
-            train_init_loader = datautils.create_loader(
-                train_dataset,
-                batch_size_dict[domain_name],
-                is_train=False,
-                num_workers=num_workers,
-            )
-            train_labels = torch.from_numpy(train_dataset.labels).detach().cuda()
-
-            self.set_attr(domain_name, "train_dataset", train_dataset)
-            self.set_attr(domain_name, "train_ordered_labels", train_labels)
-            self.set_attr(domain_name, "train_loader", train_loader)
-            self.set_attr(domain_name, "train_init_loader", train_init_loader)
-            self.set_attr(domain_name, "train_len", len(train_dataset))
-
-        # Classification and Fewshot Dataset
-
-        if fewshot:
-            train_lbd_dataset_source = datautils.create_dataset(
-                name,
-                domain["source"],
-                suffix=f"labeled_{fewshot}",
-                ret_index=True,
-                image_transform=aug_src,
-                image_size=image_size,
-            )
-            src_dataset = self.get_attr("source", "train_dataset")
+        if self.config.model_params.seg:
+            self.domain_map["source"] = "cityscapes"
+            self.domain_map["target"] = "gta5"
+            domain = self.domain_map
+            image_size = 2048
+            self.config.data_params.image_size = image_size
+            raw = "raw"
+            self.num_class = 30
+            self.class_map = None
+            batch_size_dict ={
+                "source": self.config.data_params.batch_size,
+                "target": self.config.data_params.batch_size,
+                "test": self.config.data_params.batch_size,
+                "labeled": self.config.data_params.batch_size,
+            }
+            self.batch_size_dict = batch_size_dict
+            
+            train_dataset = Cityscapes(root="./data", split="train", mode="fine", transform=transforms.ToTensor(), target_type="color")
+            val_dataset = Cityscapes(root="./data", split="val", mode="fine", transform=transforms.ToTensor(), target_type="color")
+            test_dataset = Cityscapes(root="./data", split="test", mode="fine", transform=transforms.ToTensor(), target_type="color")
+            label_indices = create_label_index(len(train_dataset), 0.05)
+            
+            fewshot_labels = get_fewshot_data_labels(train_dataset, 0.05)
+            
+            labeled_dataset = get_fewshot_data_labels(train_dataset, label_indices)
+            unlabeled_dataset = get_unlabeled_data(train_dataset, label_indices)
+            labeled_dataloader = get_fewshot_dataloader(labeled_dataset, label_indices, 32, num_workers=16, shuffle=False)
+            unlabeled_dataloader = get_unlabeled_dataloader(unlabeled_dataset, label_indices, 32, num_workers=16, shuffle=False)
             (
-                self.fewshot_index_source,
-                self.fewshot_label_source,
-            ) = datautils.get_fewshot_index(train_lbd_dataset_source, src_dataset)
+                    self.fewshot_index_source,
+                    self.fewshot_label_source,
+            ) = label_indices, labeled_dataset.targets
+            self.train_lbd_loader_source = labeled_dataloader
+            self.train_unl_loader_source = unlabeled_dataloader
+            
+            self.logger.info("TRAINING DATASET LOADED, NOW LOADING TEST DATASET")
+            
+            # self.train_loader_target = 
+            self.train_unl_loader_target = NotImplemented
+            self.test_unl_loader_source = NotImplemented
+            self.test_unl_loader_target = NotImplemented
+            # self.test_lbd_loader_source =
+            # self.test_lbd_loader_target =
+            
+            
+        
+        else:               
+                
+            name = self.config.data_params.name
+            num_workers = self.config.data_params.num_workers
+            fewshot = self.config.data_params.fewshot
+            domain = self.domain_map
+            image_size = self.config.data_params.image_size
+            aug_src = self.config.data_params.aug_src
+            aug_tgt = self.config.data_params.aug_tgt
+            raw = "raw"
 
-            test_unl_dataset_source = datautils.create_dataset(
+            self.num_class = datautils.get_class_num(
+                f'data/splits/{name}/{domain["source"]}.txt'
+            )
+            self.class_map = datautils.get_class_map(
+                f'data/splits/{name}/{domain["target"]}.txt'
+            )
+
+            batch_size_dict = {
+                "test": self.config.optim_params.batch_size,
+                "source": self.config.optim_params.batch_size_src,
+                "target": self.config.optim_params.batch_size_tgt,
+                "labeled": self.config.optim_params.batch_size_lbd,
+            }
+            self.batch_size_dict = batch_size_dict
+
+            # self-supervised Dataset
+            for domain_name in ("source", "target"):
+                aug_name = {"source": aug_src, "target": aug_tgt}[domain_name]
+
+                # Training datasets
+                train_dataset = datautils.create_dataset(
+                    name,
+                    domain[domain_name],
+                    suffix="",
+                    ret_index=True,
+                    image_transform=aug_name,
+                    use_mean_std=False,
+                    image_size=image_size,
+                )
+
+                train_loader = datautils.create_loader(
+                    train_dataset,
+                    batch_size_dict[domain_name],
+                    is_train=True,
+                    num_workers=num_workers,
+                )
+                train_init_loader = datautils.create_loader(
+                    train_dataset,
+                    batch_size_dict[domain_name],
+                    is_train=False,
+                    num_workers=num_workers,
+                )
+                train_labels = torch.from_numpy(train_dataset.labels).detach().cuda()
+
+                self.set_attr(domain_name, "train_dataset", train_dataset)
+                self.set_attr(domain_name, "train_ordered_labels", train_labels)
+                self.set_attr(domain_name, "train_loader", train_loader)
+                self.set_attr(domain_name, "train_init_loader", train_init_loader)
+                self.set_attr(domain_name, "train_len", len(train_dataset))
+
+            # Classification and Fewshot Dataset
+
+            if fewshot:
+                train_lbd_dataset_source = datautils.create_dataset(
+                    name,
+                    domain["source"],
+                    suffix=f"labeled_{fewshot}",
+                    ret_index=True,
+                    image_transform=aug_src,
+                    image_size=image_size,
+                )
+                src_dataset = self.get_attr("source", "train_dataset")
+                (
+                    self.fewshot_index_source,
+                    self.fewshot_label_source,
+                ) = datautils.get_fewshot_index(train_lbd_dataset_source, src_dataset)
+
+                test_unl_dataset_source = datautils.create_dataset(
+                    name,
+                    domain["source"],
+                    suffix=f"unlabeled_{fewshot}",
+                    ret_index=True,
+                    image_transform=raw,
+                    image_size=image_size,
+                )
+                self.test_unl_loader_source = datautils.create_loader(
+                    test_unl_dataset_source,
+                    batch_size_dict["test"],
+                    is_train=False,
+                    num_workers=num_workers,
+                )
+
+                # labels for fewshot
+                train_len = self.get_attr("source", "train_len")
+                self.fewshot_labels = (
+                    torch.zeros(train_len, dtype=torch.long).detach().cuda() - 1
+                )
+                for ind, lbl in zip(self.fewshot_index_source, self.fewshot_label_source):
+                    self.fewshot_labels[ind] = lbl
+
+            else:
+                train_lbd_dataset_source = datautils.create_dataset(
+                    name,
+                    domain["source"],
+                    ret_index=True,
+                    image_transform=aug_src,
+                    image_size=image_size,
+                )
+
+            test_suffix = "test" if self.config.data_params.train_val_split else ""
+            test_unl_dataset_target = datautils.create_dataset(
                 name,
-                domain["source"],
-                suffix=f"unlabeled_{fewshot}",
+                domain["target"],
+                suffix=test_suffix,
                 ret_index=True,
                 image_transform=raw,
                 image_size=image_size,
             )
-            self.test_unl_loader_source = datautils.create_loader(
-                test_unl_dataset_source,
+
+            self.train_lbd_loader_source = datautils.create_loader(
+                train_lbd_dataset_source,
+                batch_size_dict["labeled"],
+                num_workers=num_workers,
+            )
+            self.test_unl_loader_target = datautils.create_loader(
+                test_unl_dataset_target,
                 batch_size_dict["test"],
                 is_train=False,
                 num_workers=num_workers,
             )
 
-            # labels for fewshot
-            train_len = self.get_attr("source", "train_len")
-            self.fewshot_labels = (
-                torch.zeros(train_len, dtype=torch.long).detach().cuda() - 1
+            self.logger.info(
+                f"Dataset {name}, source {self.config.data_params.source}, target {self.config.data_params.target}"
             )
-            for ind, lbl in zip(self.fewshot_index_source, self.fewshot_label_source):
-                self.fewshot_labels[ind] = lbl
-
-        else:
-            train_lbd_dataset_source = datautils.create_dataset(
-                name,
-                domain["source"],
-                ret_index=True,
-                image_transform=aug_src,
-                image_size=image_size,
-            )
-
-        test_suffix = "test" if self.config.data_params.train_val_split else ""
-        test_unl_dataset_target = datautils.create_dataset(
-            name,
-            domain["target"],
-            suffix=test_suffix,
-            ret_index=True,
-            image_transform=raw,
-            image_size=image_size,
-        )
-
-        self.train_lbd_loader_source = datautils.create_loader(
-            train_lbd_dataset_source,
-            batch_size_dict["labeled"],
-            num_workers=num_workers,
-        )
-        self.test_unl_loader_target = datautils.create_loader(
-            test_unl_dataset_target,
-            batch_size_dict["test"],
-            is_train=False,
-            num_workers=num_workers,
-        )
-
-        self.logger.info(
-            f"Dataset {name}, source {self.config.data_params.source}, target {self.config.data_params.target}"
-        )
 
     def _create_model(self):
         version_grp = self.config.model_params.version.split("-")
@@ -245,19 +299,23 @@ class CDSAgent(BaseAgent):
         if pretrained:
             self.logger.info("Imagenet pretrained model used")
         out_dim = self.config.model_params.out_dim
-
+        if self.config.model_params.seg:
+            self.logger.info("Segmentation model used")
+            model = smp.Unet(classes=30, in_channels=3, encoder_name="resnet34", encoder_weights="imagenet")
+            
         # backbone
-        if "resnet" in version:
-            net_class = getattr(torchvision.models, version)
-
-            if pretrained:
-                model = net_class(pretrained=pretrained)
-                model.fc = nn.Linear(model.fc.in_features, out_dim)
-                torchutils.weights_init(model.fc)
-            else:
-                model = net_class(pretrained=False, num_classes=out_dim)
         else:
-            raise NotImplementedError
+            if "resnet" in version:
+                net_class = getattr(torchvision.models, version)
+
+                if pretrained:
+                    model = net_class(pretrained=pretrained)
+                    model.fc = nn.Linear(model.fc.in_features, out_dim)
+                    torchutils.weights_init(model.fc)
+                else:
+                    model = net_class(pretrained=False, num_classes=out_dim)
+            else:
+                raise NotImplementedError
 
         model = nn.DataParallel(model, device_ids=self.gpu_devices)
         model = model.cuda()
@@ -841,6 +899,7 @@ class CDSAgent(BaseAgent):
 
     @torch.no_grad()
     def compute_train_features(self):
+        
         if self.is_features_computed:
             return
         else:
@@ -855,7 +914,10 @@ class CDSAgent(BaseAgent):
             )
             for batch_i, (indices, images, labels) in enumerate(train_loader):
                 images = images.to(self.device)
-                feat = self.model(images)
+                if self.config.model_params.seg:
+                    feat = self.model.encoder(images)
+                else:
+                    feat = self.model(images)
                 feat = F.normalize(feat, dim=1)
 
                 features.append(feat)
@@ -872,6 +934,41 @@ class CDSAgent(BaseAgent):
             self.set_attr(domain, "train_features", features)
             self.set_attr(domain, "train_labels", y)
             self.set_attr(domain, "train_indices", idx)
+            
+    # def compute_train_features_for_segmentation(self):
+    #     if self.is_features_computed:
+    #         return
+    #     else:
+    #         self.is_features_computed = True
+    #     self.model.eval()
+
+    #     for domain in ("source", "target"):
+    #         train_loader = self.get_attr(domain, "train_init_loader")
+    #         features, y, idx = [], [], []
+    #         tqdm_batch = tqdm(
+    #             total=len(train_loader), desc=f"[Compute train features of {domain}]"
+    #         )
+    #         for batch_i, (indices, images, labels) in enumerate(train_loader):
+    #             images = images.to(self.device)
+    #             feat = self.model(images)
+    #             feat = F.normalize(feat, dim=1)
+
+    #             features.append(feat)
+    #             y.append(labels)
+    #             idx.append(indices)
+
+    #             tqdm_batch.update()
+    #         tqdm_batch.close()
+
+    #         features = torch.cat(features)
+    #         y = torch.cat(y)
+    #         idx = torch.cat(idx).to(self.device)
+
+    #         self.set_attr(domain, "train_features", features)
+    #         self.set_attr(domain, "train_labels", y)
+    #         self.set_attr(domain, "train_indices", idx)
+        
+        
 
     def clear_train_features(self):
         self.is_features_computed = False

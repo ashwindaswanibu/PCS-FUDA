@@ -24,6 +24,8 @@ eggs/
 parts/
 sdist/
 var/
+data/
+cityscapes/
 wheels/
 pip-wheel-metadata/
 share/python-wheels/
