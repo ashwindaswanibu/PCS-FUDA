@@ -14,8 +14,10 @@ from pcs.utils import (AverageMeter, datautils, is_div, per, reverse_domain,
 from sklearn import metrics
 from tqdm import tqdm
 import segmentation_models_pytorch as smp
+from pcs.utils.segmentation_helper import *
 from torch.utils.data import DataLoader
 from pcs.utils.datautils_seg import *
+
 from torchvision.datasets import Cityscapes
 
 
@@ -136,12 +138,14 @@ class CDSAgent(BaseAgent):
             
             labeled_dataset = get_fewshot_data_labels(train_dataset, label_indices)
             unlabeled_dataset = get_unlabeled_data(train_dataset, label_indices)
-            labeled_dataloader = get_fewshot_dataloader(labeled_dataset, label_indices, 32, num_workers=16, shuffle=False)
-            unlabeled_dataloader = get_unlabeled_dataloader(unlabeled_dataset, label_indices, 32, num_workers=16, shuffle=False)
-            (
-                    self.fewshot_index_source,
-                    self.fewshot_label_source,
-            ) = label_indices, labeled_dataset.targets
+            labeled_dataloader = get_fewshot_dataloader(labeled_dataset, label_indices, 32)
+            unlabeled_dataloader = get_unlabeled_dataloader(unlabeled_dataset, label_indices, 32)
+            #(
+            #        self.fewshot_index_source,
+            #        self.fewshot_label_source,
+            #) = label_indices, labeled_dataset.targets
+            self.fewshot_index_source = label_indices
+            self.fewshot_label_source = labeled_dataset.dataset.targets
             self.train_lbd_loader_source = labeled_dataloader
             self.train_unl_loader_source = unlabeled_dataloader
             
@@ -417,8 +421,14 @@ class CDSAgent(BaseAgent):
             total=num_batches, desc=f"[Epoch {self.current_epoch}]", leave=False
         )
         tqdm_post = {}
+        
+        
+        
         for batch_i in range(num_batches):
+            
+            
             # Kmeans
+            
             if is_div(kmeans_batches, batch_i):
                 self._update_cluster_labels()
 
@@ -1038,6 +1048,9 @@ class CDSAgent(BaseAgent):
                     ).as_tensor()
 
                     # clustering
+                    
+                    initial_centroids = initialize_centroids(memory_bank_tensor, k_list)
+                    
                     cluster_labels, cluster_centroids, cluster_phi = torch_kmeans(
                         k_list,
                         memory_bank_tensor,
