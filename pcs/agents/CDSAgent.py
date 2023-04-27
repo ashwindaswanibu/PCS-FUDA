@@ -139,7 +139,8 @@ class CDSAgent(BaseAgent):
             test_dataset = Cityscapes(root="./data", split="val", mode="fine", transform=transforms.ToTensor(), target_type="color")
             label_indices = create_label_index(len(train_dataset), 0.05)
             train_dataset_targets = one_hot_masks(train_dataset)
-            train_dataset_targets = down_sample_masks_dataset(train_dataset_targets)
+            train_dataset.targets = train_dataset_targets
+            # train_dataset_targets = down_sample_masks_dataset(train_dataset_targets)
             
             
             
@@ -502,6 +503,9 @@ class CDSAgent(BaseAgent):
 
                 if self.cls and domain_name == "source":
                     indices_lbd, images_lbd, labels_lbd = next(source_lbd_iter)
+                    downsampled_labels = labels_lbd.clone()
+                    downsampled_labels = down_sample_masks(downsampled_labels)
+                    downsampled_labels = downsampled_labels.cuda()
                     indices_lbl = indices_lbd.cuda()
                     images_lbd = images_lbd.cuda()
                     labels_lbd = labels_lbd.cuda()
@@ -509,6 +513,10 @@ class CDSAgent(BaseAgent):
                         feat_lbd = self.model.encoder(images_lbd)
                     else:
                         feat_lbd = self.model(images_lbd)                   
+                    y_hat = self.model.decoder(feat_lbd)
+                    segloss = torch.nn.BCEWithLogitsLoss()
+                    segmentation_loss = segloss(y_hat, labels_lbd)
+                    
                     
                     feat_lbd = F.normalize(feat_lbd, dim=1)
                     feat_lbd,_ = convert_image_to_regions(feat_lbd)
@@ -605,9 +613,9 @@ class CDSAgent(BaseAgent):
                     # *** handler for different loss ***
                     # classification on few-shot
                     if ls == "cls-so" and domain_name == "source":
-                        loss_part = self.criterion(out_lbd, labels_lbd)
+                        loss_part = self.criterion(out_lbd, downsampled_labels)
                     elif ls == "cls-info" and domain_name == "source":
-                        loss_part = loss_info(feat_lbd, mb_feat_lbd, labels_lbd)
+                        loss_part = loss_info(feat_lbd, mb_feat_lbd, downsampled_labels)
                     # semi-supervision learning on unlabled source
                     elif ls == "semi-entmin" and domain_name == "source":
                         loss_part = torchutils.entropy(out_semi)
@@ -664,6 +672,7 @@ class CDSAgent(BaseAgent):
                 self.optim.zero_grad()
                 if len(loss_list) and loss != 0:
                     loss.backward()
+                    segmentation_loss.backward()
                 self.optim.step()
 
                 # update memory_bank
