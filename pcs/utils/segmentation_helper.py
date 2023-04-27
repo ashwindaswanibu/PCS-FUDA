@@ -128,13 +128,14 @@ def one_hot_masks(train_dataset):
 
 def down_sample_masks(img):
     #img(b,256,256,30)
-    img= img.permute(0,3, 1, 2)
+    img = torch.from_numpy(img)
+    img= img.permute(2,0,1)
     #img(30,256,256)
     max_pool = nn.MaxPool2d(32, stride=32)
     down = max_pool(img)
     #down(30,8,8)
-    down = down.permute(0, 2,3,1)
-    return down
+    down = down.permute(1,2,0)
+    return np.array(down)
 
 def down_sample_masks_dataset(img_batched):
     arr= []
