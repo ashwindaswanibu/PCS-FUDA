@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import torch.nn as nn
 
 def masked_select(embeddings, masks):
     embeddings =embeddings.reshape(64, 512)
@@ -58,7 +59,6 @@ def assign_labels_to_regions_batch(cosine_classifier, img_embeddings_batch):
 
     return masks
 
-
 def initialize_centroids(feat, batch_size, klist, cosine_classifier):
     lbd = cosine_classifier(feat)
     #lbd = lbd.reshape(batch_size, 64, 30)
@@ -72,6 +72,8 @@ def initialize_centroids(feat, batch_size, klist, cosine_classifier):
     unique_labels = torch.unique(lbd, dim=0)
     keys = np.arange(30)
     
+        
+    
     indices = [torch.nonzero(masks[:, i], as_tuple=False) for i in range(masks.shape[1])]
 
     embeddings_list = [embeddings[indices[i]] for i in range(len(indices))]
@@ -79,13 +81,67 @@ def initialize_centroids(feat, batch_size, klist, cosine_classifier):
     embeddings_list = [embeddings_list[i].float() for i in range(len(embeddings_list))]
     mean_embeddings = []
     mean_embeddings = [torch.mean(embeddings_list[i], dim=0) for i in range(len(embeddings_list))]
+    
+    
     # print(mean_embeddings)
     #dictionary_indices = dict(zip(keys, indices))
     dictionary_mean = dict(zip(keys, mean_embeddings))
+    if len(unique_labels) < 30:
     
-    return dictionary_mean
-     
+        for i in range(30):
+            if i not in unique_labels:
+                #assign random embedding
+                dictionary_mean[i] = torch.rand(512)
+    nparray = np.array(list(dictionary_mean.values()))
+    return nparray
+
+
+def convert_image_to_regions(feature):
+    batch_size, img_embedding_rows, img_embedding_cols, img_embedding_dim = feature.shape
     
+    secondary_indices = [torch.arange(img_embedding_rows * img_embedding_cols)] * batch_size
+    regions = feature.reshape(batch_size* img_embedding_rows* img_embedding_cols, img_embedding_dim)
+    return regions, secondary_indices
+
+def sparse_make(img, dick):
+    #mask(b, 8,8,30)
+    new_mask=np.zeros((256, 256, 30))
+    for i in range(256):
+        for j in range(256):
+            channel=dick[img[i][j]]
+            new_mask[i][j][channel]= 1
+    return new_mask
+
+def one_hot_masks(train_dataset):
+    list_sparse_mat=[]
+    dick = np.load('labels.npy',allow_pickle='TRUE').item()
+    for img in train_dataset.targets:
+        x =cv2.read(img[0])
+        x = np.array(x)
+
+        sparse_mat = sparse_make(img, dick)
+        list_sparse_mat.append(sparse_mat)
+    return np.array(list_sparse_mat)
+
+
+def down_sample_masks(img):
+    #img(b,256,256,30)
+    img= img.permute(0,3, 1, 2)
+    #img(30,256,256)
+    max_pool = nn.MaxPool2d(32, stride=32)
+    down = max_pool(img)
+    #down(30,8,8)
+    down = down.permute(0, 2,3,1)
+    return down
+
+def down_sample_masks(img_batched):
+    arr= []
+    for img in img_batched:
+        down = down_sample_masks(img)
+        arr.append(down)
+    return np.array(arr)
+        
+
     
     
     

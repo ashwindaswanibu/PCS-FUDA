@@ -53,12 +53,17 @@ class CDSAgent(BaseAgent):
         super(CDSAgent, self).__init__(config)
 
         # for MIM
-        self.momentum_softmax_target = torchutils.MomentumSoftmax(
-            self.num_class, m=len(self.get_attr("target", "train_loader"))
-        )
-        self.momentum_softmax_source = torchutils.MomentumSoftmax(
-            self.num_class, m=len(self.get_attr("source", "train_loader"))
-        )
+        try:
+            self.momentum_softmax_target = torchutils.MomentumSoftmax(
+                self.num_class, m=len(self.get_attr("target", "train_loader"))
+            )
+            self.momentum_softmax_source = torchutils.MomentumSoftmax(
+                self.num_class, m=len(self.get_attr("source", "train_loader"))
+            )
+        except:
+            self.logger.info("Error encountered at MIM init, initializing to random value")
+            self.momentum_softmax_target = torchutils.MomentumSoftmax(self.num_class, m=1)
+            self.momentum_softmax_source = torchutils.MomentumSoftmax(self.num_class, m=1)
 
         # init loss
         loss_fn = SSDALossModule(self.config, gpu_devices=self.gpu_devices)
@@ -131,8 +136,11 @@ class CDSAgent(BaseAgent):
             
             train_dataset = Cityscapes(root="./data", split="train", mode="fine", transform=transforms.ToTensor(), target_type="color")
             val_dataset = Cityscapes(root="./data", split="val", mode="fine", transform=transforms.ToTensor(), target_type="color")
-            test_dataset = Cityscapes(root="./data", split="test", mode="fine", transform=transforms.ToTensor(), target_type="color")
+            test_dataset = Cityscapes(root="./data", split="val", mode="fine", transform=transforms.ToTensor(), target_type="color")
             label_indices = create_label_index(len(train_dataset), 0.05)
+            train_dataset.targets = one_hot_masks(train_dataset.targets)
+            train_dataset.targets = down_sample_masks_dataset(train_dataset.targets)
+            
             
             fewshot_labels = get_fewshot_data_labels(train_dataset, 0.05)
             
@@ -158,6 +166,27 @@ class CDSAgent(BaseAgent):
             # self.test_lbd_loader_source =
             # self.test_lbd_loader_target =
             
+            train_init_loader = datautils.create_loader(
+                train_dataset,
+                32,
+                is_train=False,
+                num_workers=4,
+            )
+            train_loader = datautils.create_loader(
+                train_dataset,
+                32,
+                is_train=True,
+                num_workers=4,
+            )
+            
+#             torch.from_numpy(train_dataset.t).detach().cuda()
+
+            domain_name = 'source'
+            self.set_attr(domain_name, "train_dataset", train_dataset)
+            self.set_attr(domain_name, "train_ordered_labels", train_dataset.targets)
+            self.set_attr(domain_name, "train_loader", train_loader)
+            self.set_attr(domain_name, "train_init_loader", train_init_loader)
+            self.set_attr(domain_name, "train_len", len(train_dataset))
             
         
         else:               
@@ -200,6 +229,7 @@ class CDSAgent(BaseAgent):
                     use_mean_std=False,
                     image_size=image_size,
                 )
+                train_dataset.targets = one_hot_masks(train_dataset.targets)
 
                 train_loader = datautils.create_loader(
                     train_dataset,
@@ -232,6 +262,7 @@ class CDSAgent(BaseAgent):
                     image_transform=aug_src,
                     image_size=image_size,
                 )
+                
                 src_dataset = self.get_attr("source", "train_dataset")
                 (
                     self.fewshot_index_source,
@@ -471,9 +502,14 @@ class CDSAgent(BaseAgent):
                     indices_lbl = indices_lbd.cuda()
                     images_lbd = images_lbd.cuda()
                     labels_lbd = labels_lbd.cuda()
-                    feat_lbd = self.model(images_lbd)
+                    if self.config.model_params.seg:
+                        feat_lbd = self.model.encoder(images_lbd)
+                    else:
+                        feat_lbd = self.model(images_lbd)                   
+                    
                     feat_lbd = F.normalize(feat_lbd, dim=1)
-                    out_lbd = self.cls_head(feat_lbd)
+                    regions_lbd,_ = convert_image_to_regions(feat_lbd)
+                    out_lbd = self.cls_head(regions_lbd)
 
                 # Matching & ssl
                 if (self.tgt and domain_name == "target") or self.ssl:
@@ -484,9 +520,13 @@ class CDSAgent(BaseAgent):
                     indices_unl, images_unl, _ = next(loader_iter)
                     images_unl = images_unl.cuda()
                     indices_unl = indices_unl.cuda()
-                    feat_unl = self.model(images_unl)
+                    if self.config.model_params.seg:
+                        feat_unl = self.model.encoder(images_unl)
+                    else:
+                        feat_unl = self.model(images_unl) 
                     feat_unl = F.normalize(feat_unl, dim=1)
-                    out_unl = self.cls_head(feat_unl)
+                    regions_unl,_ = convert_image_to_regions(feat_unl)
+                    out_unl = self.cls_head(regions_unl)
 
                 # Semi Supervised
                 if self.semi and domain_name == "source":
@@ -777,7 +817,9 @@ class CDSAgent(BaseAgent):
 
             feat = self.model(images)
             feat = F.normalize(feat, dim=1)
-            output = self.cls_head(feat)
+            regions, _ = convert_image_to_regions(feat)
+            output = self.cls_head(regions)
+            
             prob = F.softmax(output, dim=-1)
 
             loss = self.criterion(output, labels)
@@ -995,6 +1037,10 @@ class CDSAgent(BaseAgent):
                 self.compute_train_features()
                 idx = self.get_attr(domain_name, "train_indices")
                 feat = self.get_attr(domain_name, "train_features")
+
+                regions, _ = convert_image_to_regions(feat)
+                
+                
                 memory_bank.update(idx, feat)
                 # self.logger.info(
                 #     f"Initialize memorybank-{domain_name} with pretrained output features"
@@ -1048,12 +1094,13 @@ class CDSAgent(BaseAgent):
                     ).as_tensor()
 
                     # clustering
-                    
-                    initial_centroids = initialize_centroids(memory_bank_tensor, k_list)
+                    if first_epoch:
+                        initial_centroids = initialize_centroids(memory_bank_tensor, k_list)
                     
                     cluster_labels, cluster_centroids, cluster_phi = torch_kmeans(
                         k_list,
                         memory_bank_tensor,
+                        init_centroids=initial_centroids,
                         seed=self.current_epoch + self.current_iteration,
                     )
 
