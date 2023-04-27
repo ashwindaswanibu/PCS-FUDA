@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import torch.nn as nn
+import cv2
 
 def masked_select(embeddings, masks):
     embeddings =embeddings.reshape(64, 512)
@@ -105,16 +106,17 @@ def convert_image_to_regions(feature):
 
 def sparse_make(img, dick):
     #mask(b, 8,8,30)
+    img1 = cv2.imread(img)
     new_mask=np.zeros((256, 256, 30))
     for i in range(256):
         for j in range(256):
-            channel=dick[img[i][j]]
+            channel=dick[tuple(img[i][j])]
             new_mask[i][j][channel]= 1
     return new_mask
 
 def one_hot_masks(train_dataset):
     list_sparse_mat=[]
-    dick = np.load('labels.npy',allow_pickle='TRUE').item()
+    dick = np.load('PCS-FUDA-v2/PCS-FUDA-master/labels.npy',allow_pickle='TRUE').item()
     for img in train_dataset.targets:
         x =cv2.read(img[0])
         x = np.array(x)
@@ -134,7 +136,7 @@ def down_sample_masks(img):
     down = down.permute(0, 2,3,1)
     return down
 
-def down_sample_masks(img_batched):
+def down_sample_masks_dataset(img_batched):
     arr= []
     for img in img_batched:
         down = down_sample_masks(img)
