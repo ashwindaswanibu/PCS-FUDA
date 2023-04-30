@@ -134,12 +134,12 @@ class CDSAgent(BaseAgent):
             }
             self.batch_size_dict = batch_size_dict
             
-            train_dataset = Cityscapes(root="./data", split="train", mode="fine", transform=transforms.ToTensor(), target_type="color")
-            val_dataset = Cityscapes(root="./data", split="val", mode="fine", transform=transforms.ToTensor(), target_type="color")
-            test_dataset = Cityscapes(root="./data", split="val", mode="fine", transform=transforms.ToTensor(), target_type="color")
+            train_dataset = Cityscapes(root="./data", split="train", mode="fine", transform=transforms.ToTensor(), target_type="color", target_transform=transforms.ToTensor())
+            val_dataset = Cityscapes(root="./data", split="val", mode="fine", transform=transforms.ToTensor(), target_type="color", target_transform=transforms.ToTensor())
+            test_dataset = Cityscapes(root="./data", split="val", mode="fine", transform=transforms.ToTensor(), target_type="color", target_transform=transforms.ToTensor())
             label_indices = create_label_index(len(train_dataset), 0.05)
-            train_dataset_targets = one_hot_masks(train_dataset)
-            train_dataset.targets = train_dataset_targets
+            # train_dataset_targets = one_hot_masks(train_dataset)
+            # train_dataset.targets = train_dataset_targets
             # train_dataset_targets = down_sample_masks_dataset(train_dataset_targets)
             
             

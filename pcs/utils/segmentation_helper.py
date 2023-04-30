@@ -106,7 +106,7 @@ def convert_image_to_regions(feature):
 
 def sparse_make(img, dick):
     #mask(b, 8,8,30)
-    img1 = cv2.imread(img)
+    # img1 = cv2.imread(img)
     new_mask=np.zeros((256, 256, 30))
     for i in range(256):
         for j in range(256):
@@ -114,11 +114,18 @@ def sparse_make(img, dick):
             new_mask[i][j][channel]= 1
     return new_mask
 
+def one_hot_mask_data_loader(img):
+    dick = np.load('labels.npy',allow_pickle='TRUE').item()
+    img = np.array(img)
+    sparse_mat = sparse_make(img, dick)
+    return sparse_mat
+
 def one_hot_masks(train_dataset):
+    
     list_sparse_mat=[]
-    dick = np.load('PCS-FUDA-v2/PCS-FUDA-master/labels.npy',allow_pickle='TRUE').item()
+    dick = np.load('labels.npy',allow_pickle='TRUE').item()
     for img in train_dataset.targets:
-        x =cv2.read(img[0])
+        
         x = np.array(x)
 
         sparse_mat = sparse_make(img, dick)
