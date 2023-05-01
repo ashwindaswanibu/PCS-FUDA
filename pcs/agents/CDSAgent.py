@@ -187,7 +187,7 @@ class CDSAgent(BaseAgent):
 
             domain_name = 'source'
             self.set_attr(domain_name, "train_dataset", train_dataset)
-            self.set_attr(domain_name, "train_ordered_labels", train_dataset_targets)
+            self.set_attr(domain_name, "train_ordered_labels", train_dataset.targets)
             self.set_attr(domain_name, "train_loader", train_loader)
             self.set_attr(domain_name, "train_init_loader", train_init_loader)
             self.set_attr(domain_name, "train_len", len(train_dataset))
@@ -428,6 +428,7 @@ class CDSAgent(BaseAgent):
 
         source_loader = self.get_attr("source", "train_loader")
         target_loader = self.get_attr("target", "train_loader")
+
         if self.config.steps_epoch is None:
             num_batches = max(len(source_loader), len(target_loader)) + 1
             self.logger.info(f"source loader batches: {len(source_loader)}")

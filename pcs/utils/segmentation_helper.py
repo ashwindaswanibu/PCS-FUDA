@@ -104,15 +104,58 @@ def convert_image_to_regions(feature):
     regions = feature.reshape(batch_size* img_embedding_rows* img_embedding_cols, img_embedding_dim)
     return regions, secondary_indices
 
-def sparse_make(img, dick):
-    #mask(b, 8,8,30)
-    # img1 = cv2.imread(img)
-    new_mask=np.zeros((256, 256, 30))
-    for i in range(256):
-        for j in range(256):
-            channel=dick[tuple(img[i][j])]
-            new_mask[i][j][channel]= 1
+import numpy as np
+import numpy as np
+
+import numpy as np
+
+import numpy as np
+
+import numpy as np
+
+import numpy as np
+
+def sparse_make(rgb_img, dick):
+    # Get number of channels, height, and width from the input tensor
+    num_channels, height, width = rgb_img.shape
+
+    # Check if the number of channels is 4 (RGBA), and if so, extract only the RGB channels
+    if num_channels > 3:
+        rgb_img = rgb_img[:3, :, :]
+
+    # Dimensions of the new_mask (num_mask_channels, height, width)
+    num_mask_channels = 30
+    new_mask = np.zeros((num_mask_channels, height, width))
+
+    # Iterate through the pixels of the RGB image
+    for i in range(height):
+        for j in range(width):
+            # Get the RGB values of the pixel as a tuple (key)
+            rgb_key = tuple(rgb_img[:, i, j])
+
+            # Check if the RGB key is present in the dictionary
+            if rgb_key in dick:
+                # Get the channel index from the dictionary based on the RGB key
+                channel = dick[rgb_key]
+
+                # Set the corresponding channel in new_mask to 1
+                if channel is not None and channel < num_mask_channels:
+                    new_mask[channel, i, j] = 1
+
     return new_mask
+
+
+
+def transform_loader(dataloader):
+    for i, (img, mask) in enumerate(dataloader):
+    
+        mask = one_hot_mask_data_loader(mask)
+        dataloader[i] = (img,mask)
+    return dataloader
+    # print(mask.shape)
+
+    
+
 
 def one_hot_mask_data_loader(img):
     dick = np.load('labels.npy',allow_pickle='TRUE').item()
