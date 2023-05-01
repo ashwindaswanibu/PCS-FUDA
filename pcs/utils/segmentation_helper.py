@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 import cv2
+from torchvision import transforms
 
 def masked_select(embeddings, masks):
     embeddings =embeddings.reshape(64, 512)
@@ -104,16 +105,19 @@ def convert_image_to_regions(feature):
     regions = feature.reshape(batch_size* img_embedding_rows* img_embedding_cols, img_embedding_dim)
     return regions, secondary_indices
 
-import numpy as np
-import numpy as np
 
-import numpy as np
+def one_hot_mask_transform(mask):
+    # Apply your one-hot transformation to the mask here
+    print(mask.shape)
+    mask = one_hot_mask_data_loader(mask)
+    print(mask.shape)
+    return mask
 
-import numpy as np
-
-import numpy as np
-
-import numpy as np
+# Define the target mask transform
+mask_transform = transforms.Compose([
+    transforms.ToTensor(),
+    one_hot_mask_transform
+])
 
 def sparse_make(rgb_img, dick):
     # Get number of channels, height, and width from the input tensor
