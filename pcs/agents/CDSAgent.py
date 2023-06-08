@@ -986,7 +986,7 @@ class CDSAgent(BaseAgent):
             for batch_i, (indices, images, labels) in enumerate(train_loader):
                 images = images.to(self.device)
                 if self.config.model_params.seg:
-                    feat = self.model.encoder(images)
+                    feat = self.model.module.encoder(images)
                 else:
                     feat = self.model(images)
                 feat = F.normalize(feat, dim=1)
